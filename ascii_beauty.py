@@ -30,6 +30,10 @@ def parse_args() -> argparse.Namespace:
         help="图片 URL（默认是一张公开人像图）",
     )
     parser.add_argument(
+        "--image",
+        help="本地图片路径（设置后优先于 --url）",
+    )
+    parser.add_argument(
         "--width",
         type=int,
         default=80,
@@ -49,6 +53,10 @@ def download_image(url: str) -> Image.Image:
     with urlopen(request, timeout=30) as response:
         data = response.read()
     return Image.open(io.BytesIO(data))
+
+
+def load_local_image(image_path: str) -> Image.Image:
+    return Image.open(image_path)
 
 
 def detect_and_crop_face(image: Image.Image) -> Image.Image:
@@ -118,9 +126,17 @@ def main() -> None:
         raise ValueError("--width 必须为正整数")
 
     try:
-        image = download_image(args.url)
+        if args.image:
+            image = load_local_image(args.image)
+            image_source = args.image
+        else:
+            image = download_image(args.url)
+            image_source = args.url
     except URLError as error:
         print(f"下载图片失败: {error}", file=sys.stderr)
+        sys.exit(1)
+    except FileNotFoundError as error:
+        print(f"本地图片不存在: {error}", file=sys.stderr)
         sys.exit(1)
     except Exception as error:  # noqa: BLE001
         print(f"读取图片失败: {error}", file=sys.stderr)
@@ -131,7 +147,7 @@ def main() -> None:
         processed_image = detect_and_crop_face(image)
 
     art = image_to_ascii(processed_image, args.width)
-    print(f"图片来源: {args.url}")
+    print(f"图片来源: {image_source}")
     if args.disable_face_crop:
         print("模式: 原图转字符画（未启用人脸裁剪）")
     else:
