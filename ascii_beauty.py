@@ -1,18 +1,21 @@
 #!/usr/bin/env python3
-"""下载网络图片并转换为 ASCII 字符画。"""
+"""下载网络图片并转换为 ASCII 字符画，支持自动人脸裁剪。"""
 
 from __future__ import annotations
 
 import argparse
 import io
 import sys
+from pathlib import Path
 from urllib.error import URLError
 from urllib.request import urlopen
 
+import cv2
+import numpy as np
 from PIL import Image
 
 DEFAULT_IMAGE_URL = (
-    "https://images.unsplash.com/photo-1583504387138-13b671dfd2f8?auto=format&fit=crop&w=640&q=80"
+    "https://images.unsplash.com/photo-1494790108377-be9c29b29330?auto=format&fit=crop&w=640&q=80"
 )
 ASCII_CHARS = "@%#*+=-:. "
 
@@ -32,6 +35,11 @@ def parse_args() -> argparse.Namespace:
         default=80,
         help="输出字符画宽度，默认 80",
     )
+    parser.add_argument(
+        "--disable-face-crop",
+        action="store_true",
+        help="禁用自动人脸检测和裁剪",
+    )
     return parser.parse_args()
 
 
@@ -41,6 +49,37 @@ def download_image(url: str) -> Image.Image:
     with urlopen(request, timeout=30) as response:
         data = response.read()
     return Image.open(io.BytesIO(data))
+
+
+def detect_and_crop_face(image: Image.Image) -> Image.Image:
+    rgb_image = image.convert("RGB")
+    np_image = np.array(rgb_image)
+    gray = cv2.cvtColor(np_image, cv2.COLOR_RGB2GRAY)
+
+    cascade_path = Path(cv2.data.haarcascades) / "haarcascade_frontalface_default.xml"
+    detector = cv2.CascadeClassifier(str(cascade_path))
+    faces = detector.detectMultiScale(
+        gray,
+        scaleFactor=1.1,
+        minNeighbors=5,
+        minSize=(40, 40),
+    )
+
+    if len(faces) == 0:
+        return rgb_image
+
+    x, y, w, h = max(faces, key=lambda box: box[2] * box[3])
+    margin_x = int(w * 0.6)
+    margin_top = int(h * 0.9)
+    margin_bottom = int(h * 1.2)
+
+    left = max(0, x - margin_x)
+    top = max(0, y - margin_top)
+    right = min(np_image.shape[1], x + w + margin_x)
+    bottom = min(np_image.shape[0], y + h + margin_bottom)
+
+    cropped = np_image[top:bottom, left:right]
+    return Image.fromarray(cropped)
 
 
 def image_to_ascii(image: Image.Image, width: int) -> str:
@@ -87,8 +126,16 @@ def main() -> None:
         print(f"读取图片失败: {error}", file=sys.stderr)
         sys.exit(1)
 
-    art = image_to_ascii(image, args.width)
+    processed_image = image
+    if not args.disable_face_crop:
+        processed_image = detect_and_crop_face(image)
+
+    art = image_to_ascii(processed_image, args.width)
     print(f"图片来源: {args.url}")
+    if args.disable_face_crop:
+        print("模式: 原图转字符画（未启用人脸裁剪）")
+    else:
+        print("模式: 自动人脸裁剪后转字符画")
     print(art)
 
 
