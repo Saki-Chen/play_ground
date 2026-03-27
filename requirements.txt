@@ -1,3 +1,4 @@
 pillow
 requests
 opencv-python
+reportlab
